@@ -1,0 +1,32 @@
+# Maintainer: Singularity
+pkgname=singularity-image-optimizer-git
+pkgver=r3.0000000
+pkgrel=1
+pkgdesc="WebP image optimizer with a singularity-inspired interface (development version)"
+arch=('any')
+url="https://github.com/Sonaed/Singularity"
+license=('MIT')
+depends=('python' 'python-pyside6' 'python-pillow')
+makedepends=('git')
+provides=('singularity-image-optimizer')
+conflicts=('singularity-image-optimizer')
+source=('git+https://github.com/Sonaed/Singularity.git')
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${srcdir}/Singularity"
+  printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+package() {
+  install -Dm755 "${srcdir}/Singularity/webready.py" \
+    "${pkgdir}/usr/lib/singularity/webready.py"
+  install -Dm755 "${srcdir}/Singularity/packaging/debian/usr/bin/singularity" \
+    "${pkgdir}/usr/bin/singularity"
+  install -Dm644 "${srcdir}/Singularity/packaging/debian/usr/share/applications/singularity.desktop" \
+    "${pkgdir}/usr/share/applications/singularity.desktop"
+  install -Dm644 "${srcdir}/Singularity/packaging/debian/usr/share/icons/hicolor/scalable/apps/singularity.svg" \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/singularity.svg"
+  install -Dm644 "${srcdir}/Singularity/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

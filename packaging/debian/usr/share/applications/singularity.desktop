@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Singularity
+Comment=Optimiseur d'images WebP
+Exec=singularity
+Icon=singularity
+Terminal=false
+Categories=Graphics;Utility;
+Keywords=image;webp;optimisation;compression;
+StartupNotify=true

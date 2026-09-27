@@ -1,0 +1,36 @@
+{
+  "protocol": "existence.contract.v1",
+  "id": "singularity",
+  "name": "Singularity",
+  "version": "26.0",
+  "entity_type": "module",
+  "ecosystem_id": "existence",
+  "lifecycle_state": "available",
+  "capabilities": [
+    "image_processing",
+    "resource_transformation",
+    "receive_nebula_resource"
+  ],
+  "resource_namespace": "resource://existence/singularity",
+  "resource_types": [
+    "image",
+    "file",
+    "project"
+  ],
+  "permissions": [
+    "read_resource",
+    "write_resource",
+    "reference_resource",
+    "send_message"
+  ],
+  "transport": {
+    "mode": "external_process",
+    "ipc": "cli_headless"
+  },
+  "view": {
+    "embeddable": false,
+    "mode": "external"
+  },
+  "orbit_of": "nebula",
+  "dependencies": []
+}
