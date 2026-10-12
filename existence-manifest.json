@@ -2,14 +2,21 @@
   "protocol": "existence.contract.v1",
   "id": "singularity",
   "name": "Singularity",
-  "version": "26.0",
+  "version": "26.1.0",
   "entity_type": "module",
   "ecosystem_id": "existence",
   "lifecycle_state": "available",
   "capabilities": [
     "image_processing",
     "resource_transformation",
-    "receive_nebula_resource"
+    "receive_nebula_resource",
+    "static_image_export",
+    "batch_export_queue",
+    "export_presets",
+    "export_reports",
+    "jpeg_export",
+    "png_export",
+    "webp_export"
   ],
   "resource_namespace": "resource://existence/singularity",
   "resource_types": [

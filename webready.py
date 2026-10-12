@@ -30,6 +30,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -38,6 +39,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QInputDialog,
     QProgressBar,
     QPushButton,
     QSpinBox,
@@ -46,6 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 from PIL import Image, ImageOps
+from static_export import ExportSettings, Presets, export_image, unique_destination, write_report
 
 
 SUPPORTED_EXTENSIONS = {
@@ -135,15 +138,10 @@ def collect_images(folder):
     )
 
 
-def convert_image_file(source, destination, quality=DEFAULT_QUALITY):
+def convert_image_file(source, destination, quality=DEFAULT_QUALITY, output_format=None):
     """Headless conversion entry point shared by the Nebula integration."""
-    source = Path(source)
-    destination = Path(destination)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with Image.open(source) as original:
-        image = resize_image(prepare_image(original))
-        image.save(destination, "WEBP", quality=int(quality), method=6, lossless=False)
-    return destination
+    fmt = output_format or Path(destination).suffix.lstrip(".") or "webp"
+    return Path(export_image(source, destination, ExportSettings(format=fmt, quality=quality))["destination"])
 
 
 class ConverterWorker(QThread):
@@ -154,12 +152,12 @@ class ConverterWorker(QThread):
         int, int, int, int, str
     )
 
-    def __init__(self, files, output_dir, quality):
+    def __init__(self, files, output_dir, settings):
         super().__init__()
 
         self.files = files
         self.output_dir = output_dir
-        self.quality = quality
+        self.settings = settings.normalized()
 
     def run(self):
 
@@ -175,6 +173,7 @@ class ConverterWorker(QThread):
         )
 
         total = len(self.files)
+        records, failures = [], []
 
         for index, source in enumerate(self.files):
 
@@ -185,32 +184,10 @@ class ConverterWorker(QThread):
 
                 before = source.stat().st_size
 
-                with Image.open(source) as original:
-
-                    image = prepare_image(original)
-                    image = resize_image(image)
-
-                    destination = (
-                        self.output_dir
-                        / f"{source.stem}.webp"
-                    )
-
-                    # WebP :
-                    # - beaucoup plus compact que PNG
-                    # - souvent plus compact que JPEG
-                    # - conserve la transparence
-                    #
-                    # On ne transmet volontairement
-                    # pas les métadonnées EXIF.
-                    image.save(
-                        destination,
-                        "WEBP",
-                        quality=self.quality,
-                        method=6,
-                        lossless=False,
-                    )
-
-                after = destination.stat().st_size
+                destination = unique_destination(self.output_dir, source, self.settings.format)
+                record = export_image(source, destination, self.settings)
+                after = record["after_bytes"]
+                records.append(record)
 
                 total_before += before
                 total_after += after
@@ -220,6 +197,7 @@ class ConverterWorker(QThread):
             except Exception as error:
 
                 errors += 1
+                failures.append({"source": str(source), "error": str(error)})
 
                 self.status.emit(
                     f"Erreur : {source.name} — {error}"
@@ -230,6 +208,11 @@ class ConverterWorker(QThread):
             )
 
             self.progress.emit(percentage)
+
+        try:
+            write_report(self.output_dir, records, failures, self.settings)
+        except OSError as error:
+            self.status.emit(f"Rapport non écrit : {error}")
 
         self.finished_conversion.emit(
             success,
@@ -410,9 +393,10 @@ class Singularity(QMainWindow):
 
         self.files = []
         self.worker = None
+        self.preset_store = Presets()
 
         self.setWindowTitle(
-            "Singularity 26.0 — Image Optimizer"
+            "Singularity 26.1.0 — Static Image Export"
         )
 
         self.setMinimumSize(780, 640)
@@ -542,7 +526,20 @@ class Singularity(QMainWindow):
             18, 15, 18, 15
         )
 
-        format_label = QLabel("<span class='metricLabel'>FORMAT</span><br><b>WebP</b>")
+        format_label = QLabel("FORMAT")
+        format_label.setObjectName("qualityLabel")
+        self.output_format = QComboBox()
+        self.output_format.addItem("WebP", "webp")
+        self.output_format.addItem("JPEG", "jpeg")
+        self.output_format.addItem("PNG", "png")
+
+        self.preset_picker = QComboBox()
+        self.preset_picker.addItem("Preset…", None)
+        for name in self.preset_store.load():
+            self.preset_picker.addItem(name, name)
+        self.preset_picker.currentIndexChanged.connect(self.apply_preset)
+        save_preset = QPushButton("ENREGISTRER LE PRESET")
+        save_preset.clicked.connect(self.save_current_preset)
 
         resolution_label = QLabel("<span class='metricLabel'>MAXIMUM</span><br><b>2560 × 1440</b>")
 
@@ -576,6 +573,9 @@ class Singularity(QMainWindow):
         settings_layout.addWidget(
             format_label
         )
+        settings_layout.addWidget(self.output_format)
+        settings_layout.addWidget(self.preset_picker)
+        settings_layout.addWidget(save_preset)
 
         settings_layout.addWidget(
             resolution_label
@@ -1010,6 +1010,33 @@ class Singularity(QMainWindow):
                 f"{count} CORPS VISUELS PRÊTS À FRANCHIR L'HORIZON"
             )
 
+    def apply_preset(self, _index):
+        name = self.preset_picker.currentData()
+        if not name:
+            return
+        preset = self.preset_store.load().get(name)
+        if preset is None:
+            return
+        self.output_format.setCurrentIndex(max(0, self.output_format.findData(preset.format)))
+        self.quality.setValue(preset.quality)
+        self.status.setText(f"PRESET ACTIF — {name.upper()}")
+
+    def save_current_preset(self):
+        name, accepted = QInputDialog.getText(self, "Nouveau preset", "Nom du preset :")
+        if not accepted or not name.strip():
+            return
+        try:
+            self.preset_store.save(name, ExportSettings(format=self.output_format.currentData(), quality=self.quality.value()))
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "Preset", f"Impossible d’enregistrer ce preset :\n{error}")
+            return
+        self.preset_picker.blockSignals(True)
+        if self.preset_picker.findData(name.strip()) < 0:
+            self.preset_picker.addItem(name.strip(), name.strip())
+        self.preset_picker.setCurrentIndex(self.preset_picker.findData(name.strip()))
+        self.preset_picker.blockSignals(False)
+        self.status.setText(f"PRESET ENREGISTRÉ — {name.strip().upper()}")
+
     # =================================
     # CONVERSION
     # =================================
@@ -1058,7 +1085,7 @@ class Singularity(QMainWindow):
         self.worker = ConverterWorker(
             self.files.copy(),
             output_dir,
-            self.quality.value(),
+            ExportSettings(format=self.output_format.currentData(), quality=self.quality.value()),
         )
 
         self.worker.progress.connect(
@@ -1132,16 +1159,21 @@ def main():
     parser.add_argument("source", nargs="?")
     parser.add_argument("destination", nargs="?")
     parser.add_argument("--quality", type=int, default=DEFAULT_QUALITY)
+    parser.add_argument("--format", choices=("webp", "jpeg", "jpg", "png"), default=None)
     args, _ = parser.parse_known_args()
     if args.headless:
         if not args.source or not args.destination:
             return 2
-        convert_image_file(args.source, args.destination, args.quality)
+        convert_image_file(args.source, args.destination, args.quality, args.format)
         return 0
 
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "Existence"))
+    from reliability import SessionDiagnostics
     app = QApplication(
         sys.argv
     )
+    diagnostics = SessionDiagnostics("singularity")
+    app.aboutToQuit.connect(diagnostics.close)
 
     app.setApplicationName(
         "Singularity"

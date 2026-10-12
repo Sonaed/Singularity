@@ -7,15 +7,13 @@ import json
 import sys
 from pathlib import Path
 
-from PIL import Image
+from static_export import ExportSettings, export_image
 
 
-def convert_image_file(source: str, destination: str, quality: int = 82) -> None:
-    """Conversion minimale sans charger l'interface Qt de Singularity."""
-    image = Image.open(source).convert("RGB")
-    output = Path(destination)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    image.save(output, quality=max(1, min(100, quality)), optimize=True)
+def convert_image_file(source: str, destination: str, quality: int = 82, output_format: str | None = None) -> dict:
+    """Static export without loading Singularity's Qt interface."""
+    fmt = output_format or Path(destination).suffix.lstrip(".") or "webp"
+    return export_image(source, destination, ExportSettings(format=fmt, quality=quality))
 
 
 ROOT = Path(__file__).resolve().parent
@@ -43,8 +41,8 @@ def handle(request: dict) -> dict:
     destination = payload.get("destination")
     if source and destination:
         try:
-            convert_image_file(source, destination, int(payload.get("quality", 82)))
-            return response(request, True, processed=True, resource=payload.get("resource", ""), destination=destination)
+            report = convert_image_file(source, destination, int(payload.get("quality", 82)), payload.get("format"))
+            return response(request, True, processed=True, resource=payload.get("resource", ""), destination=report["destination"], report=report)
         except (OSError, ValueError, RuntimeError) as exc:
             return response(request, False, error=str(exc))
     return response(request, True, processed=False, disposition="deferred", resource=payload.get("resource", ""))
